@@ -138,6 +138,15 @@ func testSecretFactory(t *testing.T, when spec.G, it spec.S) {
 		})
 	})
 
+	when("using git basic auth", func() {
+		it("validates that the git url does not contain additional repo info", func() {
+			factory.GitUrl = "https://some-git.com/test"
+			factory.GitUser = "some-git-user"
+			_, _, err := factory.MakeSecret("test-name", "test-namespace")
+			require.EqualError(t, err, "git url should be a valid url without the repository path (ex. https://github.com)")
+		})
+	})
+
 	when("using git ssh keys", func() {
 		it("validates that the git url begins with git@", func() {
 			factory.GitUrl = "some-git"

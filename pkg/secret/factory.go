@@ -5,7 +5,8 @@ package secret
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"os"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -105,8 +106,14 @@ func (f *Factory) validate() error {
 		}
 	}
 
-	if f.GitUser != "" && !(strings.HasPrefix(f.GitUrl, "http://") || strings.HasPrefix(f.GitUrl, "https://")) {
-		return errors.Errorf("must provide a valid git url for basic auth (ex. https://github.com)")
+	if f.GitUser != "" {
+		if !(strings.HasPrefix(f.GitUrl, "http://") || strings.HasPrefix(f.GitUrl, "https://")) {
+			return errors.Errorf("must provide a valid git url for basic auth (ex. https://github.com)")
+		}
+		// regex checks if slash appears after a period, ex: www.github.com/repo
+		if match, _ := regexp.Match(`\.\w+/`, []byte(f.GitUrl)); match {
+			return errors.Errorf("git url should be a valid url without the repository path (ex. https://github.com)")
+		}
 	}
 
 	if f.GitSshKeyFile != "" && !strings.HasPrefix(f.GitUrl, "git@") {
@@ -161,7 +168,7 @@ func (f *Factory) makeDockerhubSecret(name, namespace string) (*corev1.Secret, s
 }
 
 func (f *Factory) makeGcrSecret(name string, namespace string) (*corev1.Secret, string, error) {
-	password, err := ioutil.ReadFile(f.GcrServiceAccountFile)
+	password, err := os.ReadFile(f.GcrServiceAccountFile)
 	if err != nil {
 		return nil, "", err
 	}
@@ -229,7 +236,7 @@ func (f *Factory) makeRegistrySecret(secretName string, namespace string) (*core
 }
 
 func (f *Factory) makeGitSshSecret(name string, namespace string) (*corev1.Secret, string, error) {
-	password, err := ioutil.ReadFile(f.GitSshKeyFile)
+	password, err := os.ReadFile(f.GitSshKeyFile)
 	if err != nil {
 		return nil, "", err
 	}
