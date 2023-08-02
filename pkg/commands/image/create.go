@@ -105,6 +105,8 @@ kp image create my-image --tag my-registry.com/my-repo --blob https://my-blob-ho
 	cmd.Flags().StringArrayVarP(&factory.Env, "env", "e", []string{}, "build time environment variables")
 	cmd.Flags().StringArrayVarP(&factory.ServiceBinding, "service-binding", "s", []string{}, "build time service bindings")
 	cmd.Flags().StringVar(&factory.CacheSize, "cache-size", "", "cache size as a kubernetes quantity (default \"2G\")")
+	cmd.Flags().Int64Var(&factory.SuccessBuildHistoryLimit, "success-build-history-limit", int64(10), "set the successBuildHistoryLimit (default 10)")
+	cmd.Flags().Int64Var(&factory.FailedBuildHistoryLimit, "failed-build-history-limit", int64(10), "set the failedBuildHistoryLimit (default 10)")
 	cmd.Flags().StringVar(&factory.ServiceAccount, "service-account", "default", "service account name to use")
 	cmd.Flags().BoolP("wait", "w", false, "wait for image create to be reconciled and tail resulting build logs")
 	commands.SetImgUploadDryRunOutputFlags(cmd)

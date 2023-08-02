@@ -5,6 +5,7 @@ package image_test
 
 import (
 	"encoding/json"
+	registryfakes "github.com/vmware-tanzu/kpack-cli/pkg/registry/fakes"
 	"testing"
 
 	"github.com/pivotal/kpack/pkg/apis/build/v1alpha2"
@@ -23,7 +24,6 @@ import (
 	imgcmds "github.com/vmware-tanzu/kpack-cli/pkg/commands/image"
 	"github.com/vmware-tanzu/kpack-cli/pkg/k8s"
 	"github.com/vmware-tanzu/kpack-cli/pkg/registry"
-	registryfakes "github.com/vmware-tanzu/kpack-cli/pkg/registry/fakes"
 	"github.com/vmware-tanzu/kpack-cli/pkg/testhelpers"
 )
 
@@ -43,9 +43,10 @@ func setLastAppliedAnnotation(i *v1alpha2.Image) error {
 func testCreateCommand(imageCommand func(clientSetProvider k8s.ClientSetProvider, rup registry.UtilProvider, newImageWaiter func(k8s.ClientSet) imgcmds.ImageWaiter) *cobra.Command) func(t *testing.T, when spec.G, it spec.S) {
 	return func(t *testing.T, when spec.G, it spec.S) {
 		const defaultNamespace = "some-default-namespace"
+		BuildHistoryLimit := int64(10)
+		defaultBuildHistoryLimit := &BuildHistoryLimit
 
 		registryUtilProvider := registryfakes.UtilProvider{}
-
 		fakeImageWaiter := &cmdFakes.FakeImageWaiter{}
 
 		cmdFunc := func(clientSet *fake.Clientset) *cobra.Command {
@@ -108,6 +109,8 @@ func testCreateCommand(imageCommand func(clientSetProvider k8s.ClientSetProvider
 								Size: &cacheSize,
 							},
 						},
+						SuccessBuildHistoryLimit: defaultBuildHistoryLimit,
+						FailedBuildHistoryLimit:  defaultBuildHistoryLimit,
 					},
 				}
 
@@ -248,6 +251,8 @@ Image Resource "some-image" created
 								},
 								SubPath: "some-sub-path",
 							},
+							SuccessBuildHistoryLimit: defaultBuildHistoryLimit,
+							FailedBuildHistoryLimit:  defaultBuildHistoryLimit,
 							Build: &v1alpha2.ImageBuild{
 								Env: []corev1.EnvVar{
 									{
@@ -275,6 +280,101 @@ Image Resource "some-image" created
 							"--git-revision", "some-git-rev",
 							"--sub-path", "some-sub-path",
 							"--env", "some-key=some-val",
+							"--service-binding", "SomeResource:v1:some-binding",
+						},
+						ExpectedOutput: `Creating Image Resource...
+Image Resource "some-image" created
+`,
+						ExpectCreates: []runtime.Object{
+							expectedImage,
+						},
+					}.TestKpack(t, cmdFunc)
+
+					assert.Len(t, fakeImageWaiter.Calls, 0)
+				})
+			})
+
+			when("the image config is invalid", func() {
+				it("returns an error", func() {
+					testhelpers.CommandTest{
+						Args: []string{
+							"some-image",
+							"--tag", "some-registry.io/some-repo",
+							"--blob", "some-blob",
+							"--git", "some-git-url",
+						},
+						ExpectErr:           true,
+						ExpectedOutput:      "Creating Image Resource...\n",
+						ExpectedErrorOutput: "Error: image source must be one of git, blob, or local-path\n",
+					}.TestKpack(t, cmdFunc)
+
+					assert.Len(t, fakeImageWaiter.Calls, 0)
+				})
+			})
+		})
+
+		when("build history limits are provided", func() {
+			when("the image config is valid", func() {
+				it("creates the image", func() {
+					buildHistoryLimit := int64(5)
+					success := &buildHistoryLimit
+					failed := &buildHistoryLimit
+
+					expectedImage := &v1alpha2.Image{
+						TypeMeta: metav1.TypeMeta{
+							Kind:       "Image",
+							APIVersion: "kpack.io/v1alpha2",
+						},
+						ObjectMeta: metav1.ObjectMeta{
+							Name:        "some-image",
+							Namespace:   defaultNamespace,
+							Annotations: map[string]string{},
+						},
+						Spec: v1alpha2.ImageSpec{
+							Tag: "some-registry.io/some-repo",
+							Builder: corev1.ObjectReference{
+								Kind: v1alpha2.ClusterBuilderKind,
+								Name: "default",
+							},
+							ServiceAccountName: "default",
+							Source: corev1alpha1.SourceConfig{
+								Git: &corev1alpha1.Git{
+									URL:      "some-git-url",
+									Revision: "some-git-rev",
+								},
+								SubPath: "some-sub-path",
+							},
+							Build: &v1alpha2.ImageBuild{
+								Env: []corev1.EnvVar{
+									{
+										Name:  "some-key",
+										Value: "some-val",
+									},
+								},
+								Services: v1alpha2.Services{
+									{
+										APIVersion: "v1",
+										Kind:       "SomeResource",
+										Name:       "some-binding",
+									},
+								},
+							},
+							SuccessBuildHistoryLimit: success,
+							FailedBuildHistoryLimit:  failed,
+						},
+					}
+
+					require.NoError(t, setLastAppliedAnnotation(expectedImage))
+					testhelpers.CommandTest{
+						Args: []string{
+							"some-image",
+							"--tag", "some-registry.io/some-repo",
+							"--git", "some-git-url",
+							"--git-revision", "some-git-rev",
+							"--sub-path", "some-sub-path",
+							"--env", "some-key=some-val",
+							"--success-build-history-limit", "5",
+							"--failed-build-history-limit", "5",
 							"--service-binding", "SomeResource:v1:some-binding",
 						},
 						ExpectedOutput: `Creating Image Resource...
@@ -348,6 +448,8 @@ Image Resource "some-image" created
 								},
 							},
 						},
+						SuccessBuildHistoryLimit: defaultBuildHistoryLimit,
+						FailedBuildHistoryLimit:  defaultBuildHistoryLimit,
 					},
 				}
 				require.NoError(t, setLastAppliedAnnotation(expectedImage))
@@ -400,7 +502,9 @@ Image Resource "some-image" created
 								URL: "some-blob",
 							},
 						},
-						Build: &v1alpha2.ImageBuild{},
+						Build:                    &v1alpha2.ImageBuild{},
+						SuccessBuildHistoryLimit: defaultBuildHistoryLimit,
+						FailedBuildHistoryLimit:  defaultBuildHistoryLimit,
 					},
 				}
 				require.NoError(t, setLastAppliedAnnotation(expectedImage))
@@ -448,7 +552,9 @@ Image Resource "some-image" created
 								URL: "some-blob",
 							},
 						},
-						Build: &v1alpha2.ImageBuild{},
+						Build:                    &v1alpha2.ImageBuild{},
+						SuccessBuildHistoryLimit: defaultBuildHistoryLimit,
+						FailedBuildHistoryLimit:  defaultBuildHistoryLimit,
 					},
 				}
 				require.NoError(t, setLastAppliedAnnotation(expectedImage))
@@ -497,7 +603,9 @@ Image Resource "some-image" created
 							Revision: "some-git-rev",
 						},
 					},
-					Build: &v1alpha2.ImageBuild{},
+					Build:                    &v1alpha2.ImageBuild{},
+					SuccessBuildHistoryLimit: defaultBuildHistoryLimit,
+					FailedBuildHistoryLimit:  defaultBuildHistoryLimit,
 				},
 			}
 			require.NoError(t, setLastAppliedAnnotation(expectedImage))
@@ -566,6 +674,8 @@ Image Resource "some-image" created
 							},
 							SubPath: "some-sub-path",
 						},
+						FailedBuildHistoryLimit:  defaultBuildHistoryLimit,
+						SuccessBuildHistoryLimit: defaultBuildHistoryLimit,
 						Build: &v1alpha2.ImageBuild{
 							Env: []corev1.EnvVar{
 								{
@@ -590,7 +700,7 @@ Image Resource "some-image" created
 kind: Image
 metadata:
   annotations:
-    kubectl.kubernetes.io/last-applied-configuration: '{"kind":"Image","apiVersion":"kpack.io/v1alpha2","metadata":{"name":"some-image","namespace":"some-default-namespace","creationTimestamp":null},"spec":{"tag":"some-registry.io/some-repo","builder":{"kind":"ClusterBuilder","name":"default"},"serviceAccountName":"default","source":{"git":{"url":"some-git-url","revision":"some-git-rev"},"subPath":"some-sub-path"},"build":{"services":[{"kind":"SomeResource","name":"some-binding","apiVersion":"v1"}],"env":[{"name":"some-key","value":"some-val"}],"resources":{}}},"status":{}}'
+    kubectl.kubernetes.io/last-applied-configuration: '{"kind":"Image","apiVersion":"kpack.io/v1alpha2","metadata":{"name":"some-image","namespace":"some-default-namespace","creationTimestamp":null},"spec":{"tag":"some-registry.io/some-repo","builder":{"kind":"ClusterBuilder","name":"default"},"serviceAccountName":"default","source":{"git":{"url":"some-git-url","revision":"some-git-rev"},"subPath":"some-sub-path"},"failedBuildHistoryLimit":10,"successBuildHistoryLimit":10,"build":{"services":[{"kind":"SomeResource","name":"some-binding","apiVersion":"v1"}],"env":[{"name":"some-key","value":"some-val"}],"resources":{}}},"status":{}}'
   creationTimestamp: null
   name: some-image
   namespace: some-default-namespace
@@ -607,12 +717,14 @@ spec:
   builder:
     kind: ClusterBuilder
     name: default
+  failedBuildHistoryLimit: 10
   serviceAccountName: default
   source:
     git:
       revision: some-git-rev
       url: some-git-url
     subPath: some-sub-path
+  successBuildHistoryLimit: 10
   tag: some-registry.io/some-repo
 status: {}
 `
@@ -649,7 +761,7 @@ status: {}
         "namespace": "some-default-namespace",
         "creationTimestamp": null,
         "annotations": {
-            "kubectl.kubernetes.io/last-applied-configuration": "{\"kind\":\"Image\",\"apiVersion\":\"kpack.io/v1alpha2\",\"metadata\":{\"name\":\"some-image\",\"namespace\":\"some-default-namespace\",\"creationTimestamp\":null},\"spec\":{\"tag\":\"some-registry.io/some-repo\",\"builder\":{\"kind\":\"ClusterBuilder\",\"name\":\"default\"},\"serviceAccountName\":\"default\",\"source\":{\"git\":{\"url\":\"some-git-url\",\"revision\":\"some-git-rev\"},\"subPath\":\"some-sub-path\"},\"build\":{\"services\":[{\"kind\":\"SomeResource\",\"name\":\"some-binding\",\"apiVersion\":\"v1\"}],\"env\":[{\"name\":\"some-key\",\"value\":\"some-val\"}],\"resources\":{}}},\"status\":{}}"
+            "kubectl.kubernetes.io/last-applied-configuration": "{\"kind\":\"Image\",\"apiVersion\":\"kpack.io/v1alpha2\",\"metadata\":{\"name\":\"some-image\",\"namespace\":\"some-default-namespace\",\"creationTimestamp\":null},\"spec\":{\"tag\":\"some-registry.io/some-repo\",\"builder\":{\"kind\":\"ClusterBuilder\",\"name\":\"default\"},\"serviceAccountName\":\"default\",\"source\":{\"git\":{\"url\":\"some-git-url\",\"revision\":\"some-git-rev\"},\"subPath\":\"some-sub-path\"},\"failedBuildHistoryLimit\":10,\"successBuildHistoryLimit\":10,\"build\":{\"services\":[{\"kind\":\"SomeResource\",\"name\":\"some-binding\",\"apiVersion\":\"v1\"}],\"env\":[{\"name\":\"some-key\",\"value\":\"some-val\"}],\"resources\":{}}},\"status\":{}}"
         }
     },
     "spec": {
@@ -666,6 +778,8 @@ status: {}
             },
             "subPath": "some-sub-path"
         },
+        "failedBuildHistoryLimit": 10,
+        "successBuildHistoryLimit": 10,
         "build": {
             "services": [
                 {
@@ -755,7 +869,7 @@ Image Resource "some-image" created (dry run)
 kind: Image
 metadata:
   annotations:
-    kubectl.kubernetes.io/last-applied-configuration: '{"kind":"Image","apiVersion":"kpack.io/v1alpha2","metadata":{"name":"some-image","namespace":"some-default-namespace","creationTimestamp":null},"spec":{"tag":"some-registry.io/some-repo","builder":{"kind":"ClusterBuilder","name":"default"},"serviceAccountName":"default","source":{"git":{"url":"some-git-url","revision":"some-git-rev"},"subPath":"some-sub-path"},"build":{"services":[{"kind":"SomeResource","name":"some-binding","apiVersion":"v1"}],"env":[{"name":"some-key","value":"some-val"}],"resources":{}}},"status":{}}'
+    kubectl.kubernetes.io/last-applied-configuration: '{"kind":"Image","apiVersion":"kpack.io/v1alpha2","metadata":{"name":"some-image","namespace":"some-default-namespace","creationTimestamp":null},"spec":{"tag":"some-registry.io/some-repo","builder":{"kind":"ClusterBuilder","name":"default"},"serviceAccountName":"default","source":{"git":{"url":"some-git-url","revision":"some-git-rev"},"subPath":"some-sub-path"},"failedBuildHistoryLimit":10,"successBuildHistoryLimit":10,"build":{"services":[{"kind":"SomeResource","name":"some-binding","apiVersion":"v1"}],"env":[{"name":"some-key","value":"some-val"}],"resources":{}}},"status":{}}'
   creationTimestamp: null
   name: some-image
   namespace: some-default-namespace
@@ -772,12 +886,14 @@ spec:
   builder:
     kind: ClusterBuilder
     name: default
+  failedBuildHistoryLimit: 10
   serviceAccountName: default
   source:
     git:
       revision: some-git-rev
       url: some-git-url
     subPath: some-sub-path
+  successBuildHistoryLimit: 10
   tag: some-registry.io/some-repo
 status: {}
 `
@@ -851,7 +967,7 @@ Image Resource "some-image" created (dry run with image upload)
 kind: Image
 metadata:
   annotations:
-    kubectl.kubernetes.io/last-applied-configuration: '{"kind":"Image","apiVersion":"kpack.io/v1alpha2","metadata":{"name":"some-image","namespace":"some-default-namespace","creationTimestamp":null},"spec":{"tag":"some-registry.io/some-repo","builder":{"kind":"ClusterBuilder","name":"default"},"serviceAccountName":"default","source":{"git":{"url":"some-git-url","revision":"some-git-rev"},"subPath":"some-sub-path"},"build":{"services":[{"kind":"SomeResource","name":"some-binding","apiVersion":"v1"}],"env":[{"name":"some-key","value":"some-val"}],"resources":{}}},"status":{}}'
+    kubectl.kubernetes.io/last-applied-configuration: '{"kind":"Image","apiVersion":"kpack.io/v1alpha2","metadata":{"name":"some-image","namespace":"some-default-namespace","creationTimestamp":null},"spec":{"tag":"some-registry.io/some-repo","builder":{"kind":"ClusterBuilder","name":"default"},"serviceAccountName":"default","source":{"git":{"url":"some-git-url","revision":"some-git-rev"},"subPath":"some-sub-path"},"failedBuildHistoryLimit":10,"successBuildHistoryLimit":10,"build":{"services":[{"kind":"SomeResource","name":"some-binding","apiVersion":"v1"}],"env":[{"name":"some-key","value":"some-val"}],"resources":{}}},"status":{}}'
   creationTimestamp: null
   name: some-image
   namespace: some-default-namespace
@@ -868,12 +984,14 @@ spec:
   builder:
     kind: ClusterBuilder
     name: default
+  failedBuildHistoryLimit: 10
   serviceAccountName: default
   source:
     git:
       revision: some-git-rev
       url: some-git-url
     subPath: some-sub-path
+  successBuildHistoryLimit: 10
   tag: some-registry.io/some-repo
 status: {}
 `
@@ -944,6 +1062,8 @@ status: {}
 								},
 							},
 						},
+						SuccessBuildHistoryLimit: defaultBuildHistoryLimit,
+						FailedBuildHistoryLimit:  defaultBuildHistoryLimit,
 					},
 				}
 

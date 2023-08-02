@@ -6,6 +6,7 @@ package image
 import (
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -39,23 +40,25 @@ type Printer interface {
 }
 
 type Factory struct {
-	SourceUploader       SourceUploader
-	AdditionalTags       []string
-	GitRepo              string
-	GitRevision          string
-	Blob                 string
-	LocalPath            string
-	SubPath              *string
-	Builder              string
-	ClusterBuilder       string
-	Env                  []string
-	ServiceBinding       []string
-	CacheSize            string
-	DeleteEnv            []string
-	DeleteAdditionalTags []string
-	DeleteServiceBinding []string
-	Printer              Printer
-	ServiceAccount       string
+	SourceUploader           SourceUploader
+	AdditionalTags           []string
+	GitRepo                  string
+	GitRevision              string
+	Blob                     string
+	LocalPath                string
+	SubPath                  *string
+	Builder                  string
+	ClusterBuilder           string
+	Env                      []string
+	ServiceBinding           []string
+	CacheSize                string
+	SuccessBuildHistoryLimit int64
+	FailedBuildHistoryLimit  int64
+	DeleteEnv                []string
+	DeleteAdditionalTags     []string
+	DeleteServiceBinding     []string
+	Printer                  Printer
+	ServiceAccount           string
 }
 
 func (f *Factory) MakeImage(name, namespace, tag string) (*v1alpha2.Image, error) {
@@ -84,6 +87,14 @@ func (f *Factory) MakeImage(name, namespace, tag string) (*v1alpha2.Image, error
 		return nil, err
 	}
 
+	if f.SuccessBuildHistoryLimit < 0 {
+		return nil, errors.New("must provide a valid build history limit >= 0")
+	}
+
+	if f.FailedBuildHistoryLimit < 0 {
+		return nil, errors.New("must provide a valid build history limit >= 0")
+	}
+
 	builder := f.makeBuilder(namespace)
 
 	if f.ServiceAccount == "" {
@@ -100,11 +111,13 @@ func (f *Factory) MakeImage(name, namespace, tag string) (*v1alpha2.Image, error
 			Namespace: namespace,
 		},
 		Spec: v1alpha2.ImageSpec{
-			Tag:                tag,
-			AdditionalTags:     f.AdditionalTags,
-			Builder:            builder,
-			ServiceAccountName: f.ServiceAccount,
-			Source:             source,
+			Tag:                      tag,
+			AdditionalTags:           f.AdditionalTags,
+			Builder:                  builder,
+			ServiceAccountName:       f.ServiceAccount,
+			Source:                   source,
+			SuccessBuildHistoryLimit: &f.SuccessBuildHistoryLimit,
+			FailedBuildHistoryLimit:  &f.FailedBuildHistoryLimit,
 			Build: &v1alpha2.ImageBuild{
 				Env:      envVars,
 				Services: svcs,
@@ -220,6 +233,19 @@ func (f *Factory) getCacheSize() (*resource.Quantity, error) {
 	}
 
 	return &c, nil
+}
+
+func (f *Factory) makeBuildHistoryLimit(buildHistoryLimit string) (*int64, error) {
+	if buildHistoryLimit == "" {
+		return nil, nil
+	}
+
+	value, err := strconv.ParseInt(buildHistoryLimit, 10, 64)
+	if err != nil || value < 1 {
+		return nil, errors.New("must provide a valid build history limit >1")
+	}
+
+	return &value, nil
 }
 
 func (f *Factory) makeSource(tag string) (corev1alpha1.SourceConfig, error) {

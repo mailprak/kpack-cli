@@ -126,6 +126,8 @@ kp image save my-image --tag my-registry.com/my-repo --blob https://my-blob-host
 	cmd.Flags().StringVar(&factory.LocalPath, "local-path", "", "path to local source code")
 	cmd.Flags().StringVar(&subPath, "sub-path", "", "build code at the sub path located within the source code directory")
 	cmd.Flags().StringVar(&factory.CacheSize, "cache-size", "", "cache size as a kubernetes quantity (default \"2G\")")
+	cmd.Flags().Int64Var(&factory.SuccessBuildHistoryLimit, "success-build-history-limit", int64(10), "set the successBuildHistoryLimit (default 10)")
+	cmd.Flags().Int64Var(&factory.FailedBuildHistoryLimit, "failed-build-history-limit", int64(10), "set the failedBuildHistoryLimit (default 10)")
 	cmd.Flags().StringVarP(&factory.Builder, "builder", "b", "", "builder name")
 	cmd.Flags().StringVarP(&factory.ClusterBuilder, "cluster-builder", "c", "", "cluster builder name")
 	cmd.Flags().StringArrayVarP(&factory.Env, "env", "e", []string{}, "build time environment variables")
